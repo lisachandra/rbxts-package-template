@@ -1,0 +1,53 @@
+#!/bin/bash
+
+# Git Bash's grep -P requires a unibyte or UTF-8 locale; force UTF-8 so the
+# PCRE destructive-command patterns actually run instead of failing silently.
+export LC_ALL=C.UTF-8
+
+INPUT=$(cat)
+COMMAND=$(printf '%s' "$INPUT" | jq -r '
+  .preToolUse.parameters.command //
+  .tool_input.command //
+  empty
+' 2>/dev/null || true)
+
+if [ -z "$COMMAND" ] || [ "$COMMAND" = "null" ]; then
+  exit 0
+fi
+
+# Strip single-quoted, double-quoted strings, and heredoc bodies to avoid
+# false positives on commit messages, echo arguments, etc.
+STRIPPED=$(echo "$COMMAND" | sed -E "
+  s/<<'[^']*'.*//g
+  s/'[^']*'//g
+  s/\"[^\"]*\"//g
+")
+
+blocked() {
+  echo "BLOCKED: '$COMMAND' matches dangerous pattern '$1'. The user has prevented you from doing this.${2:+ $2}" >&2
+  exit 2
+}
+
+# pattern|instruction
+RULES=(
+  "\brm\s+-rf\b|Run \`pnpm clean\` or rename the target to a .backup extension instead of deleting."
+  "\brm\s+-r\b|Run \`pnpm clean\` or rename the target to a .backup extension instead of deleting."
+  "\brm\s+-f\b|Run \`pnpm clean\` or rename the target to a .backup extension instead of deleting."
+  "\bdd\s+if=|"
+  "\bmkfs\b|"
+  "\bformat\s+[A-Z]:|"
+  "mise run bedrock -- publish|"
+  "gh workflow run release.yaml|"
+  "pnpm bedrock:publish|"
+  "pnpm release:|"
+)
+
+for rule in "${RULES[@]}"; do
+  pattern="${rule%%|*}"
+  instruction="${rule#*|}"
+  if echo "$STRIPPED" | grep -qP "$pattern"; then
+    blocked "$pattern" "$instruction"
+  fi
+done
+
+exit 0

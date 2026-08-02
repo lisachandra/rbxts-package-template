@@ -1,0 +1,19 @@
+#!/bin/bash
+INPUT=$(cat)
+COMMAND=$(printf '%s' "$INPUT" | jq -r '
+  .preToolUse.parameters.command //
+  .tool_input.command //
+  empty
+' 2>/dev/null || true)
+
+if [ -z "$COMMAND" ] || [ "$COMMAND" = "null" ]; then
+  exit 0
+fi
+
+MATCH=$(echo "$COMMAND" | grep -oE '(^|\s|&&|\|\||;)(npm|yarn|bun|npx)(\s|$)' | head -1 | tr -d ' ;|&')
+if [ -n "$MATCH" ]; then
+  echo "Blocked: use pnpm instead of $MATCH" >&2
+  exit 2
+fi
+
+exit 0

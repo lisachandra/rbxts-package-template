@@ -9,7 +9,6 @@ creator-docs/
 .diracrules
 .zcode
 .dirac-cache
-.agents
 
 # Dependencies
 node_modules

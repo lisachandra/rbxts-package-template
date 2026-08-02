@@ -1,0 +1,64 @@
+#!/bin/bash
+set -u
+
+INPUT=$(cat)
+FILE=$(printf '%s' "$INPUT" | jq -r '
+  .preToolUse.parameters.path //
+  .preToolUse.parameters.file_path //
+  .preToolUse.parameters.filename //
+  .postToolUse.parameters.path //
+  .postToolUse.parameters.file_path //
+  .postToolUse.parameters.filename //
+  .tool_input.path //
+  .tool_input.file_path //
+  .tool_input.filename //
+  .path // empty
+' 2>/dev/null || true)
+FILES=""
+
+# Codex's apply_patch sends the patch text in tool_input.command; extract
+# every target path from the patch headers so the same policy applies.
+if [ -z "$FILE" ] || [ "$FILE" = "null" ]; then
+  FILES=$(printf '%s' "$INPUT" | jq -r '
+    .tool_input.command //
+    .preToolUse.parameters.command //
+    .postToolUse.parameters.command //
+    empty
+  ' 2>/dev/null | sed -nE 's/^\*{3} (Add File|Update File|Move to):[[:space:]]*(.*)$/\2/p' || true)
+  FILE=$(printf '%s\n' "$FILES" | head -1)
+fi
+
+if [ -z "$FILE" ] || [ "$FILE" = "null" ]; then
+  exit 0
+fi
+
+# Normalize separators and harmless relative prefixes before applying policy.
+normalize() {
+  local f="$1"
+  f=${f//\\//}
+  while [[ "$f" == ./* ]]; do f=${f#./}; done
+  f=${f#"$PWD"/}
+  printf '%s' "$f"
+}
+
+BLOCKED=""
+while IFS= read -r raw_file; do
+  [ -n "$raw_file" ] || continue
+  FILE=$(normalize "$raw_file")
+  case "$FILE" in
+    eslint.config.*|*/eslint.config.*|oxlint.config.*|*/oxlint.config.*|\
+    out|out/*|build|build/*|flamework.build|flamework.build/*|\
+    *.rbxl|*.rbxlx|*.rbxm|*.rbxmx|\
+    pnpm-lock.yaml|package-lock.json|yarn.lock|*.lock)
+      BLOCKED="$FILE"
+      break
+      ;;
+  esac
+done < <(printf '%s\n' "$FILE" "$FILES")
+
+if [ -n "$BLOCKED" ]; then
+  echo "Blocked: config, generated, or lock files are not allowed to be changed by an edit tool: $BLOCKED" >&2
+  exit 2
+fi
+
+exit 0

@@ -1,0 +1,70 @@
+{
+	"$schema": "https://www.schemastore.org/claude-code-settings.json",
+	"includeCoAuthoredBy": true,
+	"permissions": {
+		"allow": [
+			"Bash(gh:*)",
+			"Bash(gh pr:*)",
+			"Bash(gh pr create:*)",
+			"Bash(gh pr view:*)",
+			"Bash(gh run list:*)",
+			"Bash(gh run view:*)",
+			"Glob",
+			"Grep",
+			"Read",
+			"Read(*)",
+			"TodoWrite",
+			"WebFetch",
+			"WebSearch"
+		],
+		"deny": [],
+		"ask": [],
+		"defaultMode": "plan",
+		"additionalDirectories": []
+	},
+	"hooks": {
+		"PreToolUse": [
+			{
+				"matcher": "edit_file|write_to_file|Edit|Write",
+				"hooks": [
+					{
+						"type": "command",
+						"command": ".agents/hooks/run-hook.cmd block-unsupported-edits"
+					}
+				]
+			},
+			{
+				"matcher": "execute_command|Bash",
+				"hooks": [
+					{
+						"type": "command",
+						"command": ".agents/hooks/run-hook.cmd enforce-pnpm"
+					},
+					{
+						"type": "command",
+						"command": ".agents/hooks/run-hook.cmd enforce-pnpm-scripts"
+					},
+					{
+						"type": "command",
+						"command": ".agents/hooks/run-hook.cmd enforce-safe-git"
+					},
+					{
+						"type": "command",
+						"command": ".agents/hooks/run-hook.cmd block-destructive-commands"
+					}
+				]
+			}
+		],
+		"PostToolUse": [
+			{
+				"matcher": "edit_file|write_to_file|Edit|Write",
+				"hooks": [
+					{
+						"type": "command",
+						"command": ".agents/hooks/run-hook.cmd lint"
+					}
+				]
+			}
+		]
+	}
+}

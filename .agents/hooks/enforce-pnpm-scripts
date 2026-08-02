@@ -1,0 +1,43 @@
+#!/bin/bash
+INPUT=$(cat)
+COMMAND=$(printf '%s' "$INPUT" | jq -r '
+  .preToolUse.parameters.command //
+  .tool_input.command //
+  empty
+' 2>/dev/null || true)
+
+if [ -z "$COMMAND" ] || [ "$COMMAND" = "null" ]; then
+  exit 0
+fi
+
+blocked() {
+  echo "BLOCKED: raw '$1' detected. The user has prevented you from doing this.${2:+ Use '$2' instead.}" >&2
+  exit 2
+}
+
+# tool_regex|suggestion (suggestion is optional)
+RULES=(
+  "jest-roblox|pnpm run test"
+  "jest|pnpm run test"
+  "eslint|pnpm run lint:fix"
+  "oxfmt|pnpm run lint:fix"
+  "oxlint|pnpm run lint:fix"
+  "prettier|pnpm run lint:fix"
+  "tsc|pnpm run typecheck"
+  "tsgo|pnpm run typecheck"
+  "rbxtsc|pnpm run build"
+)
+
+STRIPPED=$(echo "$COMMAND" | sed -E '/git commit/,$d; s/"[^"]*"//g; s/'"'"'[^'"'"']*'"'"'//g')
+
+for rule in "${RULES[@]}"; do
+  tool="${rule%%|*}"
+  suggestion="${rule#*|}"
+  if echo "$STRIPPED" | grep -qE "(^|\s|&&|\|\||;)${tool}(\s|$)"; then
+    if ! echo "$STRIPPED" | grep -qE "(pnpm run|pnpm exec|pnpmx|pnpm x|pnpx|nr)"; then
+      blocked "$tool" "$suggestion"
+    fi
+  fi
+done
+
+exit 0

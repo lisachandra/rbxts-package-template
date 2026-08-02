@@ -1,0 +1,39 @@
+#!/bin/bash
+INPUT=$(cat)
+COMMAND=$(printf '%s' "$INPUT" | jq -r '
+  .preToolUse.parameters.command //
+  .tool_input.command //
+  empty
+' 2>/dev/null || true)
+
+if [ -z "$COMMAND" ] || [ "$COMMAND" = "null" ]; then
+  exit 0
+fi
+
+blocked() {
+  echo "BLOCKED: '$COMMAND' matches dangerous pattern '$1'. The user has prevented you from doing this.${2:+ Use '$2' instead.}" >&2
+  exit 2
+}
+
+# pattern::suggestion (suggestion is optional). Use :: so regex | is safe.
+RULES=(
+  'push --force($|[[:space:]])::push --force-with-lease'
+  '--no-verify::'
+  'git reset --hard::git stash'
+  'reset --hard::git stash'
+  'git clean -fd::'
+  'git clean -f::'
+  'git checkout \.::git stash'
+  'git restore \.::git stash'
+)
+
+for rule in "${RULES[@]}"; do
+  pattern="${rule%%::*}"
+  suggestion="${rule#*::}"
+  # -- ends options so patterns like --no-verify are not treated as flags.
+  if echo "$COMMAND" | grep -qE -- "$pattern"; then
+    blocked "$pattern" "$suggestion"
+  fi
+done
+
+exit 0
