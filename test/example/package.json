@@ -1,0 +1,30 @@
+{
+	"name": "@lisachandra/test-example",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build": "shx rm -rf out && rbxtsc --type 'game' --includePath node_modules/@lisachandra/types/out/include --noInclude --verbose --allowCommentDirectives",
+		"dev": "rbxtsc --type 'game' --includePath node_modules/@lisachandra/types/out/include --noInclude --watch --allowCommentDirectives",
+		"serve:rbx-tree": "io-serve",
+		"serve:sourcemap": "rojo sourcemap --watch default.project.json --output sourcemap.json",
+		"serve:rojo": "rojo serve default.project.json",
+		"test": "pnpm exec jest-roblox ./jest.config.ts"
+	},
+	"devDependencies": {
+		"@isentinel/jest-roblox": "catalog:",
+		"@isentinel/roblox-ts": "catalog:",
+		"@isentinel/tsconfig": "catalog:",
+		"@lisachandra/example": "workspace:*",
+		"@lisachandra/types": "catalog:",
+		"@rbxts/compiler-types": "catalog:",
+		"@rbxts/jest": "catalog:",
+		"@rbxts/jest-globals": "catalog:",
+		"@rbxts/luau-polyfill": "catalog:",
+		"@rbxts/services": "catalog:",
+		"@rbxts/types": "catalog:",
+		"io-serve": "catalog:",
+		"shx": "catalog:",
+		"typescript": "catalog:"
+	}
+}

@@ -1,0 +1,34 @@
+{
+	"js/ts.experimental.useTsgo": true,
+	"js/ts.tsdk.path": "./node_modules/@typescript/native-preview",
+	"js/ts.tsdk.promptToUseWorkspaceVersion": true,
+	"files.eol": "\n",
+	"roblox-ts.command.npm.useNpmScripts": true,
+	"roblox-ts.command.npm.watchScript": "dev",
+	"oxc.typeAware": true,
+	"oxc.tsConfigPath": "${workspaceFolder}\\tsconfig.json",
+	"editor.defaultFormatter": "oxc.oxc-vscode",
+	"editor.codeActionsOnSave": {
+		"source.fixAll.oxc": "always"
+	},
+	"oxc.enable": true,
+	"npm.packageManager": "pnpm",
+	"mise.configureExtensionsUseSymLinks": true,
+	"search.exclude": {
+		"**/.jest-roblox": true
+	},
+	"files.exclude": {
+		"**/.git": true,
+		"**/.svn": true,
+		"**/.hg": true,
+		"**/.DS_Store": true,
+		"**/Thumbs.db": true,
+		"**/out": false,
+		"**/node_modules/@lisachandra": false,
+		"!**/out": true,
+		"!**/node_modules/@lisachandra": true
+	},
+	"chat.hookFilesLocations": {
+		"./.agents/settings.json": true
+	}
+}

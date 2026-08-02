@@ -1,0 +1,22 @@
+# Normalize line endings for text files
+* text=auto
+
+*.sh text eol=lf
+*.mjs text eol=lf
+*.js text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.lua text eol=lf
+*.luau text eol=lf
+.husky/* text eol=lf
+package.json text eol=lf
+pnpm-lock.yaml text eol=lf -diff
+
+# Roblox binary formats
+*.rbxl binary
+*.rbxm binary

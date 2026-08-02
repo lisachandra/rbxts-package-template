@@ -1,0 +1,41 @@
+# Environment and local state
+*.env
+.prepare-build.lock
+.sandcastle/
+.pnpm-store/
+.tmp/
+.workspace-links/
+creator-docs/
+.diracrules
+.zcode
+.dirac-cache
+.agents
+
+# Dependencies
+node_modules
+
+# Build output
+out/
+/dist
+/build
+coverage/
+.jest-roblox/
+game-output.log
+jest-output.log
+*.tsbuildinfo
+*.config.d.ts
+jest.shared.d.ts
+sourcemap.json
+flamework.build
+
+# Roblox place files
+*.rbxl
+*.rbxl.lock
+
+# Editor / OS
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.history/
+Thumbs.db
+Thumbs.db:encryptable

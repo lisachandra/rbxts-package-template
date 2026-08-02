@@ -1,0 +1,44 @@
+{
+	"extends": "@isentinel/tsconfig/roblox",
+	"compilerOptions": {
+		"typeRoots": [
+			"${configDir}/node_modules/@rbxts",
+			"${configDir}/node_modules/@lisachandra",
+			"${configDir}/node_modules/@flamework"
+		],
+		"types": [
+			"../@rbxts/types",
+			"../@rbxts/services",
+			"../@rbxts/compiler-types",
+			"../@lisachandra/types"
+		],
+		"preserveSymlinks": true,
+		"exactOptionalPropertyTypes": false,
+		"noPropertyAccessFromIndexSignature": false,
+		"declaration": true,
+		"composite": true,
+		"tsBuildInfoFile": "${configDir}/out/tsconfig.tsbuildinfo",
+		"module": "preserve",
+		"moduleResolution": "bundler",
+		"sourceMap": true,
+		"downlevelIteration": null,
+		"customConditions": ["source"]
+	},
+	"references": [
+		{
+			"path": "tsconfig.node.json"
+		},
+		{
+			"path": "packages/example"
+		},
+		{
+			"path": "test/example"
+		}
+	],
+	"files": [],
+	"include": [
+		"${configDir}/src/**/*.ts",
+		"${configDir}/src/**/*.tsx",
+		"${configDir}/src/**/*.json"
+	]
+}
