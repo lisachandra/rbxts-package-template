@@ -4,6 +4,15 @@
   <p>
     <strong>A monorepo template for publishable roblox-ts packages.</strong>
   </p>
+
+![CI Status][ci-badge] ![Test Results][test-results-badge]
+![Test Coverage][test-coverage-badge] ![Version][version-badge]
+
+[ci-badge]: https://github.com/lisachandra/rbxts-package-template/actions/workflows/ci.yaml/badge.svg
+[test-results-badge]: https://gist.githubusercontent.com/lisachandra/df57d44f003b280db81b6ddb1aec81ba/raw/test-results-badge.svg
+[test-coverage-badge]: https://gist.githubusercontent.com/lisachandra/df57d44f003b280db81b6ddb1aec81ba/raw/test-coverage-badge.svg
+[version-badge]: https://gist.githubusercontent.com/lisachandra/df57d44f003b280db81b6ddb1aec81ba/raw/version-badge.svg
+
 </div>
 
 A pnpm monorepo template for `@lisachandra` roblox-ts packages, modeled on the
@@ -103,6 +112,16 @@ Each `test/<name>` project builds a minimal Roblox place with
   `ROBLOX_UNIVERSE_ID` (see `.env.example`). The API key needs
   `universe-places:write` and `universe.place.luau-execution-session:write`
   scopes on a dedicated test place.
+
+## Status Badges
+
+The CI workflow updates the test, coverage, and version badges in a public
+gist using `schneegans/dynamic-badges-action`. To enable it:
+
+1. Set the repository variable `CI_BADGE_GIST_ID` to your gist ID.
+2. Create a GitHub personal access token with the `gist` scope and set it as
+   the `GIST_SECRET` repository secret.
+3. Point the badge links at the top of this file at your gist ID.
 
 ## Releases
 

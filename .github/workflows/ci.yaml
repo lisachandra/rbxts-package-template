@@ -40,8 +40,14 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: ci
+    concurrency:
+      group: luau-execution
+      cancel-in-progress: false
     env:
       HAS_ROBLOX_OPEN_CLOUD: ${{ secrets.ROBLOX_OPEN_CLOUD_API_KEY != '' }}
+    outputs:
+      coverage: ${{ steps.extract_coverage.outputs.coverage }}
+      test_results: ${{ steps.extract_test_results.outputs.test_results }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -56,8 +62,89 @@ jobs:
 
       - name: Test
         if: ${{ env.HAS_ROBLOX_OPEN_CLOUD == 'true' }}
-        run: pnpm test
+        run: pnpm test --coverageReporters json-summary --coverageReporters json | tee test_results.txt
         env:
           ROBLOX_OPEN_CLOUD_API_KEY: ${{ secrets.ROBLOX_OPEN_CLOUD_API_KEY }}
           ROBLOX_PLACE_ID: ${{ secrets.ROBLOX_PLACE_ID }}
           ROBLOX_UNIVERSE_ID: ${{ secrets.ROBLOX_UNIVERSE_ID }}
+
+      - id: extract_coverage
+        name: Extract Coverage
+        run: |
+          COVERAGE=$(node -e 'const fs=require("fs");const{execSync}=require("child_process");const files=execSync("find test -name coverage-summary.json").toString().trim().split(/\r?\n/).filter(Boolean);let total=0,covered=0;for(const f of files){const s=JSON.parse(fs.readFileSync(f,"utf8"));total+=s.total.lines.total;covered+=s.total.lines.covered;}process.stdout.write(total?String(Math.round(covered/total*100)):"0");')
+          echo "coverage=$COVERAGE" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - id: extract_test_results
+        name: Extract Test Results
+        run: |
+          TEST_RESULTS=$(grep -oP 'Tests:\s+\K.*' test_results.txt | tail -n 1 || true)
+          if [ -z "$TEST_RESULTS" ]; then
+            TEST_RESULTS="unavailable"
+          fi
+          echo "test_results=$TEST_RESULTS" >> "$GITHUB_OUTPUT"
+
+  badge:
+    needs: [test]
+    if: ${{ needs.test.outputs.test_results != '' && needs.test.outputs.test_results != 'unavailable' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: ci
+    env:
+      HAS_GIST: ${{ secrets.GIST_SECRET != '' && vars.CI_BADGE_GIST_ID != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - id: badge_info
+        name: Get Badge Information
+        run: |
+          echo "coverage=${{ needs.test.outputs.coverage }}" >> "$GITHUB_OUTPUT"
+          echo "test_results=${{ needs.test.outputs.test_results }}" >> "$GITHUB_OUTPUT"
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if echo "${{ needs.test.outputs.test_results }}" | grep -q "failed"; then
+            echo "test_color=hsl(0, 100%, 40%)" >> "$GITHUB_OUTPUT"
+          else
+            echo "test_color=hsl(120, 100%, 40%)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create Test Coverage Badge
+        if: ${{ env.HAS_GIST == 'true' }}
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          filename: test-coverage-badge.svg
+          gistID: ${{ vars.CI_BADGE_GIST_ID }}
+          label: test coverage
+          maxColorRange: 100
+          message: ${{ steps.badge_info.outputs.coverage }}%
+          minColorRange: 0
+          valColorRange: ${{ steps.badge_info.outputs.coverage }}
+
+      - name: Create Test Results Badge
+        if: ${{ env.HAS_GIST == 'true' }}
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          color: ${{ steps.badge_info.outputs.test_color }}
+          filename: test-results-badge.svg
+          gistID: ${{ vars.CI_BADGE_GIST_ID }}
+          label: tests
+          message: ${{ steps.badge_info.outputs.test_results }}
+
+      - name: Create Version Badge
+        if: ${{ env.HAS_GIST == 'true' }}
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          color: blue
+          filename: version-badge.svg
+          gistID: ${{ vars.CI_BADGE_GIST_ID }}
+          label: version
+          message: ${{ steps.badge_info.outputs.version }}
