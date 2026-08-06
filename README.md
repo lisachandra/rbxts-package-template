@@ -40,6 +40,18 @@ build/lint/typecheck/test pipeline while dropping game-only machinery
 - pnpm
 - Git
 
+## Setup Wizard (recommended)
+
+Run the interactive setup wizard instead of configuring by hand:
+
+```bash
+bash scripts/setup-template.sh
+```
+
+It walks you through renaming `packages/example` and `test/example`, your
+Roblox Open Cloud test credentials, the npm publish token, badge gists, and
+GitHub CI secrets, then installs and builds.
+
 ## Getting Started
 
 ```bash
