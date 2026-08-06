@@ -1,2 +1,2 @@
 #!/bin/sh
-pnpm dlx commitlint --edit \
+pnpm exec commitlint --edit \

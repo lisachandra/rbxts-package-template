@@ -14,6 +14,7 @@ try {
     $inputObj = $rawInput | ConvertFrom-Json
     # Dirac nests tool metadata under preToolUse; keep Claude-style fallback.
     $toolName = $inputObj.preToolUse.toolName
+    if (-not $toolName) { $toolName = $inputObj.preToolUse.tool_name }
     if (-not $toolName) { $toolName = $inputObj.tool_name }
 
     # Locate settings.json relative to this script's directory

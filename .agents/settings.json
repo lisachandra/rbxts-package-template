@@ -61,7 +61,8 @@
 				"hooks": [
 					{
 						"type": "command",
-						"command": ".agents/hooks/run-hook.cmd lint"
+						"command": ".agents/hooks/run-hook.cmd lint",
+						"timeout": 60
 					}
 				]
 			}

@@ -9,6 +9,7 @@ creator-docs/
 .diracrules
 .zcode
 .dirac-cache
+.agents/.skill-lock.json
 
 # Dependencies
 node_modules

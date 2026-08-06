@@ -143,7 +143,6 @@ pnpmfileChecksum: sha256-15yQafiOk/n/FnyMLJdjllwGXgNxN7Ro+mGuxVKxhic=
 
 patchedDependencies:
   '@isentinel/roblox-ts@4.0.11': a85a67d36212b3d5b664aa95b0d5f467998bfee93187f4912ee42df25634cb9d
-  '@rbxts-js/emittery@3.16.0-ts.1': 497d0cd5bf9e422c2955f51b8c9a28e030f5d4b68882ffba4770166ff3f8c496
   '@rbxts-js/expect@3.16.0-ts.1': 0b057609d0c4eabd5a55bc3b84d4ad03d8ad99b10764d0843d17a0f470c90ff3
   '@rbxts-js/jest-mock@3.16.0-ts.1': 29ab8511121e7a1c1e57c1f21e5a30f921bdfa31a96e4a7fb2c6c7157c74404e
   '@rbxts-js/jest-runner@3.16.0-ts.1': 8e9687762b0ea516c5c4ab0f396cb7160d1baabcc3a31cff81ee578112013085
@@ -6670,7 +6669,7 @@ snapshots:
     dependencies:
       '@rbxts-js/luau-polyfill': 1.2.3-ts.1
 
-  '@rbxts-js/emittery@3.16.0-ts.1(patch_hash=497d0cd5bf9e422c2955f51b8c9a28e030f5d4b68882ffba4770166ff3f8c496)':
+  '@rbxts-js/emittery@3.16.0-ts.1':
     dependencies:
       '@rbxts-js/luau-polyfill': 1.2.3-ts.1
       '@rbxts-js/roblox-lua-promise': 3.5.0-ts.2
@@ -6738,7 +6737,7 @@ snapshots:
   '@rbxts-js/jest-core@3.16.0-ts.1':
     dependencies:
       '@rbxts-js/chalk-lua': 0.2.2-ts.2
-      '@rbxts-js/emittery': 3.16.0-ts.1(patch_hash=497d0cd5bf9e422c2955f51b8c9a28e030f5d4b68882ffba4770166ff3f8c496)
+      '@rbxts-js/emittery': 3.16.0-ts.1
       '@rbxts-js/jest-config': 3.16.0-ts.1
       '@rbxts-js/jest-console': 3.16.0-ts.1
       '@rbxts-js/jest-message-util': 3.16.0-ts.1
@@ -6861,7 +6860,7 @@ snapshots:
   '@rbxts-js/jest-runner@3.16.0-ts.1(patch_hash=8e9687762b0ea516c5c4ab0f396cb7160d1baabcc3a31cff81ee578112013085)':
     dependencies:
       '@rbxts-js/chalk-lua': 0.2.2-ts.2
-      '@rbxts-js/emittery': 3.16.0-ts.1(patch_hash=497d0cd5bf9e422c2955f51b8c9a28e030f5d4b68882ffba4770166ff3f8c496)
+      '@rbxts-js/emittery': 3.16.0-ts.1
       '@rbxts-js/jest-circus': 3.16.0-ts.1
       '@rbxts-js/jest-console': 3.16.0-ts.1
       '@rbxts-js/jest-environment': 3.16.0-ts.1
@@ -7019,7 +7018,7 @@ snapshots:
 
   '@rbxts/emittery@3.16.0-ts.1':
     dependencies:
-      '@rbxts-js/emittery': 3.16.0-ts.1(patch_hash=497d0cd5bf9e422c2955f51b8c9a28e030f5d4b68882ffba4770166ff3f8c496)
+      '@rbxts-js/emittery': 3.16.0-ts.1
 
   '@rbxts/jest-globals@3.16.0-ts.1(patch_hash=d42fa3158b6373f2ccc3e1d6b4a349da546dbc66e3412add2bc04fe7c973caf0)':
     dependencies:

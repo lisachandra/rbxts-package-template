@@ -2,18 +2,37 @@
 # Reads the hooks.PostToolUse configuration from settings.json dynamically,
 # then runs the matching hook commands for the current tool.
 # This keeps the enforcement logic in settings.json as the single source of truth.
+#
+# PostToolUse is advisory (Claude Code PostToolUse semantics): findings are
+# returned as context feedback for the agent, but the tool that triggered the
+# hook is NEVER cancelled or failed by this script.
+
+function Format-HookResponse {
+    param([string]$Context)
+
+    $response = @{
+        cancel              = $false
+        contextModification = $Context
+        errorMessage        = ""
+        additionalContext   = $Context
+        suppressOutput      = $true
+    }
+    return $response | ConvertTo-Json -Compress
+}
 
 try {
-    # Read JSON from stdin (how Dirac invokes hooks)
+    # Read JSON from stdin (how Dirac and Claude Code invoke hooks)
     $rawInput = [Console]::In.ReadToEnd()
     if (-not $rawInput) {
-        @{ cancel = $false; contextModification = ""; errorMessage = "" } | ConvertTo-Json -Compress
+        Format-HookResponse ""
         exit 0
     }
 
     $inputObj = $rawInput | ConvertFrom-Json
-    # Dirac nests tool metadata under postToolUse; keep Claude-style fallback.
+    # Dirac nests tool metadata under postToolUse; Claude Code nests it under
+    # postToolUse too but uses snake_case (tool_name/tool_input).
     $toolName = $inputObj.postToolUse.toolName
+    if (-not $toolName) { $toolName = $inputObj.postToolUse.tool_name }
     if (-not $toolName) { $toolName = $inputObj.tool_name }
 
     # Locate settings.json relative to this script's directory
@@ -22,7 +41,7 @@ try {
     $settingsPath = Join-Path (Split-Path -Parent $hookDir) "settings.json"
 
     if (-not (Test-Path $settingsPath)) {
-        @{ cancel = $false; contextModification = ""; errorMessage = "" } | ConvertTo-Json -Compress
+        Format-HookResponse ""
         exit 0
     }
 
@@ -30,9 +49,11 @@ try {
     $postToolUseHooks = $settings.hooks.PostToolUse
 
     if (-not $postToolUseHooks) {
-        @{ cancel = $false; contextModification = ""; errorMessage = "" } | ConvertTo-Json -Compress
+        Format-HookResponse ""
         exit 0
     }
+
+    $feedback = [System.Collections.Generic.List[string]]::new()
 
     # Find matchers that apply to this tool
     foreach ($entry in $postToolUseHooks) {
@@ -52,30 +73,33 @@ try {
                 $agentsDir = (Split-Path -Parent $hookDir).Replace('\', '/')
                 $resolvedRunner = $runner -replace '^\.agents/', ($agentsDir + '/')
 
-                if ($resolvedRunner -match '\.cmd$') {
-                    $output = $rawInput | & $resolvedRunner $scriptArgs 2>&1
-                } elseif ($resolvedRunner -match '\.ps1$') {
-                    $output = $rawInput | & $resolvedRunner $scriptArgs 2>&1
-                } else {
-                    $output = $rawInput | & $resolvedRunner $scriptArgs 2>&1
-                }
+                $output = $rawInput | & $resolvedRunner $scriptArgs 2>&1
                 $exitCode = $LASTEXITCODE
 
+                # Advisory only: lint findings (or hook failures) become context
+                # feedback; a non-zero exit never cancels the triggering tool.
+                # Strip the "# 2>nul &" echo artifact that cmd.exe emits when the
+                # cross-platform run-hook.cmd polyglot starts (prompt + line).
+                $text = (($output | Out-String) -split "`r?`n" | Where-Object { $_ -notmatch '^(?:.*>)?#\s*2>nul\s*&?\s*$' }) -join "`n"
+                $text = $text.Trim()
                 if ($exitCode -ne 0) {
-                    $errorMsg = ($output | Out-String).Trim()
-                    if (-not $errorMsg) { $errorMsg = "Hook '$command' failed with exit code $exitCode" }
-                    @{ cancel = $true; contextModification = ""; errorMessage = $errorMsg } | ConvertTo-Json -Compress
-                    exit 1
+                    if ($text) {
+                        $feedback.Add("Hook '$command' exited with code $exitCode.`n$text")
+                    } else {
+                        $feedback.Add("Hook '$command' exited with code $exitCode.")
+                    }
+                } elseif ($text) {
+                    $feedback.Add($text)
                 }
             }
         }
     }
 
-    @{ cancel = $false; contextModification = ""; errorMessage = "" } | ConvertTo-Json -Compress
+    Format-HookResponse ($feedback -join "`n`n")
     exit 0
 
 } catch {
-    Write-Error "[PostToolUse] Error: $($_.Exception.Message)"
-    @{ cancel = $true; contextModification = ""; errorMessage = "PostToolUse hook error: $($_.Exception.Message)" } | ConvertTo-Json -Compress
-    exit 1
+    # Even an unexpected failure must not cancel the edit; surface it as feedback.
+    Format-HookResponse "PostToolUse hook error: $($_.Exception.Message)"
+    exit 0
 }

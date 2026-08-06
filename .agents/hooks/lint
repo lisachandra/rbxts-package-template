@@ -6,9 +6,15 @@ FILE=$(printf '%s' "$INPUT" | jq -r '
   .postToolUse.parameters.path //
   .postToolUse.parameters.file_path //
   .postToolUse.parameters.filename //
+  .postToolUse.tool_input.file_path //
+  .postToolUse.tool_input.path //
+  .postToolUse.tool_input.filename //
   .preToolUse.parameters.path //
   .preToolUse.parameters.file_path //
   .preToolUse.parameters.filename //
+  .preToolUse.tool_input.file_path //
+  .preToolUse.tool_input.path //
+  .preToolUse.tool_input.filename //
   .tool_input.path //
   .tool_input.file_path //
   .tool_input.filename //
@@ -27,7 +33,7 @@ if [[ "$FILE" = /* ]]; then
   FILE=${FILE#"$REPO_ROOT"/}
 fi
 
-cd "$REPO_ROOT"
+cd "$REPO_ROOT" || exit 0
 if [ ! -f "$FILE" ]; then
   exit 0
 fi
@@ -40,13 +46,33 @@ case "$FILE" in
     ;;
 esac
 
-# Run the repository's installed linters only for the changed file.
-if ! pnpm exec oxfmt "$FILE"; then
-  exit 1
+# PostToolUse linting is advisory: findings are printed as feedback for the
+# agent, but the edit that triggered this hook must never be blocked or failed.
+# Always exit 0 regardless of what the linters report.
+notices=""
+
+if ! OXFMT_OUTPUT=$(pnpm exec oxfmt "$FILE" 2>&1); then
+  OXFMT_OUTPUT=$(printf '%s' "$OXFMT_OUTPUT" | sed '/\[WARN\] Ignored project-level auth setting/d')
+  notices="${notices}[lint] oxfmt reported issues in $FILE
+$OXFMT_OUTPUT
+
+"
 fi
 
-if ! pnpm exec oxlint --fix "$FILE"; then
-  exit 1
+if ! OXLINT_OUTPUT=$(pnpm exec oxlint --fix "$FILE" 2>&1); then
+  OXLINT_OUTPUT=$(printf '%s' "$OXLINT_OUTPUT" | sed '/\[WARN\] Ignored project-level auth setting/d')
+  notices="${notices}[lint] oxlint reported issues in $FILE
+$OXLINT_OUTPUT
+
+"
+fi
+
+if [ -n "$notices" ]; then
+  if [ "${#notices}" -gt 30000 ]; then
+    printf '%s\n%s\n' "${notices:0:30000}" "[lint] output truncated; run 'pnpm exec oxlint <file>' locally for full results"
+  else
+    printf '%s' "$notices"
+  fi
 fi
 
 exit 0
