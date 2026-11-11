@@ -7,7 +7,7 @@
 			"$className": "ReplicatedStorage",
 			"TS": {
 				"$className": "Folder",
-				"example:tests": {
+				"tests": {
 					"$path": "out"
 				},
 				"rbxts_include": {

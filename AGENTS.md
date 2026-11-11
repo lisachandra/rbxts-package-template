@@ -4,11 +4,20 @@
 - Use **pnpm** for package management and `./scripts/build.mjs` scopes
   (`all`, `packages`, `test`) for builds.
 
+## References
+
+- [Setup guide](docs/agents/setup-guide.md): fresh copy → build, test lane, adding a package.
+- [Offline runtime parity ledger](docs/agents/offline-runtime-spike.md): what the
+  emulator test lane does and does not emulate.
+
 ## Setup
 
 ```bash
 pnpm setup
 ```
+
+`sloptor` (the compiler) and `ree` (the emulator test backend) come from
+`mise.toml`. Run `mise install` once, or prefix with `mise x --`.
 
 ## Commands
 
@@ -58,3 +67,20 @@ Co-Authored-By: (the agent's name and attribution byline)
 - Workspace deps use `workspace:*`; tooling versions come from the pnpm
   catalog in `pnpm-workspace.yaml`.
 - Release notes are changesets; every user-facing change gets one.
+
+## Testing
+
+Each `test/<name>` workspace is one Rojo project with its own
+`jest.config.luau`. The default lane is the **emulator** backend: it stages the
+compiled `out/` tree and runs it inside `ree`, offline, with no Studio
+roundtrip. `pnpm test` fans out across every test workspace in parallel.
+
+A spec that only fails under the emulator is a parity gap, not a broken test.
+Add it to `reeParityPaths` in `jest.shared.ts` and record the symptom in the
+ledger. `--backend studio` runs the same config against a real Studio install
+when you need to confirm.
+
+Container folders a spec indexes at require time must be declared in the test
+project's `default.project.json` as a `$path` mount — the stage only materialises
+`$path` nodes, and instance names must be valid directory names on every
+platform (no `:` on Windows).

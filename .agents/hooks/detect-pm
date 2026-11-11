@@ -1,0 +1,42 @@
+#!/bin/bash
+# detect-pm — sourced helper for package-manager-aware hook scripts.
+#
+# detect_pm [dir] sets two globals in the calling shell:
+#   PM       — "bun", "pnpm", or "" (no lockfile found)
+#   PM_ROOT  — directory owning the lockfile (best-effort fallback: start dir)
+# and also prints the PM value for `PM="$(detect_pm)"` convenience capture.
+# bun.lock wins over pnpm-lock.yaml when both are present (newest migration
+# intent). Without an argument, detection starts from the agent project dir
+# when the host exposes one (ZCODE_PROJECT_DIR / CLAUDE_PROJECT_DIR), else $PWD.
+
+detect_pm() {
+	local dir="${1:-${ZCODE_PROJECT_DIR:-${CLAUDE_PROJECT_DIR:-$PWD}}}"
+	dir="${dir//\\//}"
+	PM=""
+	PM_ROOT="$dir"
+	local cur="$dir" parent
+	while true; do
+		if [ -f "$cur/bun.lock" ] || [ -f "$cur/bun.lockb" ]; then
+			PM="bun"
+			PM_ROOT="$cur"
+			printf 'bun'
+			return 0
+		fi
+		if [ -f "$cur/pnpm-lock.yaml" ]; then
+			PM="pnpm"
+			PM_ROOT="$cur"
+			printf 'pnpm'
+			return 0
+		fi
+		# Stop at filesystem/drive roots so we never loop past them.
+		if [[ "$cur" =~ ^[A-Za-z]:/?$ ]] || [ "$cur" = "/" ] || [ "$cur" = "." ]; then
+			break
+		fi
+		parent="$(dirname "$cur")"
+		if [ "$parent" = "$cur" ]; then
+			break
+		fi
+		cur="$parent"
+	done
+	return 0
+}

@@ -5,47 +5,83 @@
 export LC_ALL=C.UTF-8
 
 INPUT=$(cat)
-COMMAND=$(printf '%s' "$INPUT" | jq -r '
-  .preToolUse.parameters.command //
-  .tool_input.command //
-  empty
+COMMANDS=$(printf '%s' "$INPUT" | jq -r '
+  def jstr: fromjson? // .;
+  [
+    (.preToolUse.parameters.commands? | jstr),
+    .preToolUse.parameters.script?,
+    .preToolUse.parameters.command?,
+    (.tool_input.commands? | jstr),
+    .tool_input.command?,
+    .tool_input.script?
+  ] | map(select(. != null))
+    | map(if type == "array" then .[] else . end)
+    | map(select(type == "string" and length > 0))
+    | .[]
 ' 2>/dev/null || true)
 
-if [ -z "$COMMAND" ] || [ "$COMMAND" = "null" ]; then
+if [ -z "$COMMANDS" ]; then
   exit 0
 fi
 
-# Strip single-quoted, double-quoted strings, and heredoc bodies to avoid
-# false positives on commit messages, echo arguments, etc.
-STRIPPED=$(echo "$COMMAND" | sed -E "
+# Strip single-quoted, double-quoted strings, backticks, and heredoc bodies to
+# avoid false positives on commit messages, echo arguments, etc.
+STRIPPED=$(printf '%s' "$COMMANDS" | sed -E "
   s/<<'[^']*'.*//g
+  s/<<\"[^\"]*\".*//g
   s/'[^']*'//g
   s/\"[^\"]*\"//g
+  s/\`[^\`]*\`//g
+  s/#.*//g
 ")
 
 blocked() {
-  echo "BLOCKED: '$COMMAND' matches dangerous pattern '$1'. The user has prevented you from doing this.${2:+ $2}" >&2
+  echo "BLOCKED: '$COMMANDS' matches dangerous pattern '$1'. The user has prevented you from doing this.${2:+ $2}" >&2
   exit 2
 }
 
-# pattern|instruction
+# pattern|instruction  (PCRE via grep -P; patterns must not contain '|' —
+# regex alternation is expressed as separate rules instead)
 RULES=(
-  "\brm\s+-rf\b|Run \`pnpm clean\` or rename the target to a .backup extension instead of deleting."
-  "\brm\s+-r\b|Run \`pnpm clean\` or rename the target to a .backup extension instead of deleting."
-  "\brm\s+-f\b|Run \`pnpm clean\` or rename the target to a .backup extension instead of deleting."
-  "\bdd\s+if=|"
-  "\bmkfs\b|"
-  "\bformat\s+[A-Z]:|"
-  "mise run bedrock -- publish|"
-  "gh workflow run release.yaml|"
-  "pnpm bedrock:publish|"
-  "pnpm release:|"
+  # rm variants — any recursive or force flag, long or short, combined (e.g. -rf, -Rf, -fr, -rfi, --recursive)
+  "\brm\b.*--[[:space:]]*recursive\b|Run \`pnpm clean\` or rename the target to a .backup extension instead of deleting."
+  "\brm\b.*--[[:space:]]*force\b|Run \`pnpm clean\` or rename the target to a .backup extension instead of deleting."
+  "\brm\b.*-[a-zA-Z]*r[a-zA-Z]*\b|Run \`pnpm clean\` or rename the target to a .backup extension instead of deleting."
+  "\brm\b.*-[a-zA-Z]*f[a-zA-Z]*\b|Run \`pnpm clean\` or rename the target to a .backup extension instead of deleting."
+  # Windows equivalents
+  "\bRemove-Item\b.*-Recurse|Use pnpm clean or rename to .backup instead of deleting."
+  "\bRemove-Item\b.*-Force|Use pnpm clean or rename to .backup instead of deleting."
+  "\brd\b\s+/s|Use pnpm clean instead of rd /s."
+  "\bdel\b\s+.*/[fqs]\b|Use pnpm clean instead of del /f."
+  # dd — any write to block device is destructive
+  "\bdd\s+if=|dd with if= is destructive — verify target before running."
+  "\bdd\b.*\bof=/dev/|dd targeting /dev/ is destructive."
+  # filesystem / disk destructive
+  "\bmkfs\b|mkfs is destructive."
+  "\bmkfs\.|mkfs is destructive."
+  "\bmkswap\b|mkswap is destructive."
+  "\bwipefs\b|wipefs is destructive."
+  "\bshred\b|shred is destructive."
+  "\bfd[i]sk\b|fdisk is destructive."
+  "\bparted\b|parted is destructive."
+  "\bdiskpart\b|diskpart is destructive."
+  "\bformat\s+[A-Z]:|format is destructive."
+  # permission bombs
+  "\bchmod\s+-R\s+777\b|chmod -R 777 is destructive."
+  # fork bomb
+  ":\(\\)\s*\{\s*:|Fork bomb detected."
+  ":&\s*\};:|Fork bomb detected."
+  # publish guards
+  "mise run bedrock -- publish|Publishing is blocked in this hook."
+  "gh workflow run release\.yaml|Publishing is blocked in this hook."
+  "pnpm bedrock:publish|Publishing is blocked in this hook."
+  "pnpm release:|Publishing is blocked in this hook."
 )
 
 for rule in "${RULES[@]}"; do
   pattern="${rule%%|*}"
   instruction="${rule#*|}"
-  if echo "$STRIPPED" | grep -qP "$pattern"; then
+  if printf '%s' "$STRIPPED" | grep -qP "$pattern"; then
     blocked "$pattern" "$instruction"
   fi
 done

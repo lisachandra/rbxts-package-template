@@ -1,19 +1,107 @@
 #!/bin/bash
+export LC_ALL=C.UTF-8
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=detect-pm
+. "$SCRIPT_DIR/detect-pm"
+
 INPUT=$(cat)
-COMMAND=$(printf '%s' "$INPUT" | jq -r '
-  .preToolUse.parameters.command //
-  .tool_input.command //
-  empty
+COMMANDS=$(printf '%s' "$INPUT" | jq -r '
+  def jstr: fromjson? // .;
+  [
+    (.preToolUse.parameters.commands? | jstr),
+    .preToolUse.parameters.script?,
+    .preToolUse.parameters.command?,
+    (.tool_input.commands? | jstr),
+    .tool_input.command?,
+    .tool_input.script?
+  ] | map(select(. != null))
+    | map(if type == "array" then .[] else . end)
+    | map(select(type == "string" and length > 0))
+    | .[]
 ' 2>/dev/null || true)
 
-if [ -z "$COMMAND" ] || [ "$COMMAND" = "null" ]; then
+if [ -z "$COMMANDS" ]; then
   exit 0
 fi
 
-MATCH=$(echo "$COMMAND" | grep -oE '(^|\s|&&|\|\||;)(npm|yarn|bun|npx)(\s|$)' | head -1 | tr -d ' ;|&')
-if [ -n "$MATCH" ]; then
-  echo "Blocked: use pnpm instead of $MATCH" >&2
+# Strip quoted strings/backticks/heredocs to avoid false positives on messages
+STRIPPED=$(printf '%s' "$COMMANDS" | sed -E "
+  s/<<'[^']*'.*//g
+  s/<<\"[^\"]*\".*//g
+  s/'[^']*'//g
+  s/\"[^\"]*\"//g
+  s/\`[^\`]*\`//g
+")
+
+PM=""
+detect_pm >/dev/null
+
+blocked() {
+  echo "BLOCKED: use $PM instead of '$1' (found in: $COMMANDS). Run with $PM." >&2
   exit 2
+}
+
+# No lockfile anywhere up the tree: the project's package manager is unknown,
+# so we never block — advise and let the command run (exit 0).
+advisory() {
+  printf '%s\n' "[suggest] No lockfile (bun.lock / pnpm-lock.yaml) found in $PM_ROOT — package manager not enforced; picked up '$1'. Consider committing a lockfile."
+  exit 0
+}
+
+# Lockfile-name mentions like "bun.lock" / "pnpm-lock.yaml" must not trip the
+# binary patterns below, hence the (?![-.]lock) guards.
+if [ "$PM" = "bun" ]; then
+  if printf '%s' "$STRIPPED" | grep -qP '(^|[\s;&|()])npm(\.cmd|\.ps1)?\b'; then
+    blocked "npm"
+  fi
+  if printf '%s' "$STRIPPED" | grep -qP '(^|[\s;&|()])npx(\.cmd)?\b'; then
+    blocked "npx (use bunx / bun x)"
+  fi
+  if printf '%s' "$STRIPPED" | grep -qP '(^|[\s;&|()])yarn(pkg)?(\.cmd)?(?![-.]lock)\b'; then
+    blocked "yarn"
+  fi
+  if printf '%s' "$STRIPPED" | grep -qP '(^|[\s;&|()])pn(pm|px)(\.cmd|\.ps1)?(?![-.]lock)\b'; then
+    blocked "pnpm/pnpx (use bun)"
+  fi
+  if printf '%s' "$STRIPPED" | grep -qP '\bcorepack\b.*\b(npm|yarn|pnpm)\b'; then
+    blocked "corepack npm/yarn/pnpm (use bun)"
+  fi
+  if printf '%s' "$STRIPPED" | grep -qP '([/\\]|\.bin[/\\])(npm|npx|yarn|pnpm|pnpx)(\.cmd)?(?![-.]lock)\b'; then
+    blocked "absolute-path npm/yarn/pnpm"
+  fi
+  exit 0
+fi
+
+if [ "$PM" = "pnpm" ]; then
+  # PCRE via grep -P: \b boundaries prevent matching pnpm itself.
+  # Covers npm/npx (and .cmd), yarn/yarnpkg, bun/bunx, corepack shims.
+  if printf '%s' "$STRIPPED" | grep -qP '(^|[\s;&|()])npm(\.cmd|\.ps1)?\b'; then
+    blocked "npm"
+  fi
+  if printf '%s' "$STRIPPED" | grep -qP '(^|[\s;&|()])npx(\.cmd)?\b'; then
+    blocked "npx (use pnpm exec / pnpm dlx)"
+  fi
+  if printf '%s' "$STRIPPED" | grep -qP '(^|[\s;&|()])yarn(pkg)?(\.cmd)?\b'; then
+    blocked "yarn"
+  fi
+  if printf '%s' "$STRIPPED" | grep -qP '(^|[\s;&|()])bunx?(\.cmd)?(?![-.]lock)\b'; then
+    blocked "bun/bunx"
+  fi
+  # corepack pnpm is ok, corepack npm/yarn is not
+  if printf '%s' "$STRIPPED" | grep -qP '\bcorepack\b.*\b(npm|yarn)\b'; then
+    blocked "corepack npm/yarn (use pnpm)"
+  fi
+  if printf '%s' "$STRIPPED" | grep -qP '([/\\]|\.bin[/\\])(npm|npx|yarn|bunx?)(\.cmd)?(?![-.]lock)\b'; then
+    blocked "absolute-path npm/yarn/bun"
+  fi
+  exit 0
+fi
+
+# Unknown package manager: advisory only, and only when an npm-family binary
+# is actually being invoked.
+if printf '%s' "$STRIPPED" | grep -qP '(^|[\s;&|()])(npm|npx|yarn(pkg)?|pn(pm|px)|bunx?)(\.cmd|\.ps1)?\b'; then
+  advisory "$(printf '%s' "$STRIPPED" | head -n 1)"
 fi
 
 exit 0

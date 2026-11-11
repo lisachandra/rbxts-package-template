@@ -9,6 +9,9 @@ FILE=$(printf '%s' "$INPUT" | jq -r '
   .postToolUse.parameters.path //
   .postToolUse.parameters.file_path //
   .postToolUse.parameters.filename //
+  (.preToolUse.parameters.files? | (fromjson? // .) | if type == "array" then .[]?.path else . end) //
+  (.postToolUse.parameters.files? | (fromjson? // .) | if type == "array" then .[]?.path else . end) //
+  (.tool_input.files? | (fromjson? // .) | if type == "array" then .[]?.path else . end) //
   .tool_input.path //
   .tool_input.file_path //
   .tool_input.filename //
@@ -33,27 +36,57 @@ if [ -z "$FILE" ] || [ "$FILE" = "null" ]; then
 fi
 
 # Normalize separators and harmless relative prefixes before applying policy.
+# Also handles ZCode's absolute Windows paths (D:/.../pnpm-lock.yaml) by
+# matching on suffix/basename, so hooks fire regardless of cwd.
 normalize() {
   local f="$1"
   f=${f//\\//}
   while [[ "$f" == ./* ]]; do f=${f#./}; done
+  # Strip PWD and repo-root prefixes when present
   f=${f#"$PWD"/}
+  if [[ -n "${ZCODE_PROJECT_DIR:-}" ]]; then
+    local proj="${ZCODE_PROJECT_DIR//\\//}"
+    f=${f#"$proj"/}
+  fi
+  if [[ -n "${CLAUDE_PROJECT_DIR:-}" ]]; then
+    local cproj="${CLAUDE_PROJECT_DIR//\\//}"
+    f=${f#"$cproj"/}
+  fi
+  # For bare absolute paths, keep only the suffix after the last
+  # occurrence of a blocked basename so suffix matching still works.
   printf '%s' "$f"
+}
+
+is_blocked_path() {
+  local f="$1"
+  case "$f" in
+    eslint.config.*|*/eslint.config.*|oxlint.config.*|*/oxlint.config.*|\
+    out|out/*|build|build/*|flamework.build|flamework.build/*|\
+    *.rbxl|*.rbxlx|*.rbxm|*.rbxmx|\
+    pnpm-lock.yaml|package-lock.json|yarn.lock|*.lock|bun.lockb|bunfig.toml)
+      return 0
+      ;;
+  esac
+  # Absolute-path fallback: basename/ancestor match
+  case "$f" in
+    */pnpm-lock.yaml|*/package-lock.json|*/yarn.lock|*.lock|*/bun.lockb|*/bunfig.toml|\
+    */eslint.config.*|*/oxlint.config.*|\
+    */out/*|*/build/*|*/flamework.build/*|\
+    *.rbxl|*.rbxlx|*.rbxm|*.rbxmx)
+      return 0
+      ;;
+  esac
+  return 1
 }
 
 BLOCKED=""
 while IFS= read -r raw_file; do
   [ -n "$raw_file" ] || continue
   FILE=$(normalize "$raw_file")
-  case "$FILE" in
-    eslint.config.*|*/eslint.config.*|oxlint.config.*|*/oxlint.config.*|\
-    out|out/*|build|build/*|flamework.build|flamework.build/*|\
-    *.rbxl|*.rbxlx|*.rbxm|*.rbxmx|\
-    pnpm-lock.yaml|package-lock.json|yarn.lock|*.lock)
-      BLOCKED="$FILE"
-      break
-      ;;
-  esac
+  if is_blocked_path "$FILE" || is_blocked_path "$raw_file" || is_blocked_path "${raw_file//\\//}"; then
+    BLOCKED="$FILE"
+    break
+  fi
 done < <(printf '%s\n' "$FILE" "$FILES")
 
 if [ -n "$BLOCKED" ]; then

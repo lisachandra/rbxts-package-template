@@ -2,12 +2,31 @@
 # Reads the hooks.PreToolUse configuration from settings.json dynamically,
 # then runs the matching hook commands for the current tool.
 # This keeps the enforcement logic in settings.json as the single source of truth.
+#
+# Semantics:
+# - Blocking child exit -> cancel:true JSON + exit code 2 (Claude Code's block
+#   convention). Dirac honors the JSON regardless of exit code.
+# - Zero exit + output  -> advisory: cancel:false with the output as context
+#   feedback (e.g. suggest-rg suggestions).
+
+function Format-HookResponse {
+    param([string]$Context)
+
+    $response = @{
+        cancel              = $false
+        contextModification = $Context
+        errorMessage        = ""
+        additionalContext   = $Context
+        suppressOutput      = $true
+    }
+    return $response | ConvertTo-Json -Compress
+}
 
 try {
-    # Read JSON from stdin (how Dirac invokes hooks)
+    # Read JSON from stdin (how Dirac and Claude Code invoke hooks)
     $rawInput = [Console]::In.ReadToEnd()
     if (-not $rawInput) {
-        @{ cancel = $false; contextModification = ""; errorMessage = "" } | ConvertTo-Json -Compress
+        Format-HookResponse ""
         exit 0
     }
 
@@ -23,7 +42,7 @@ try {
     $settingsPath = Join-Path (Split-Path -Parent $hookDir) "settings.json"
 
     if (-not (Test-Path $settingsPath)) {
-        @{ cancel = $false; contextModification = ""; errorMessage = "" } | ConvertTo-Json -Compress
+        Format-HookResponse ""
         exit 0
     }
 
@@ -31,9 +50,11 @@ try {
     $preToolUseHooks = $settings.hooks.PreToolUse
 
     if (-not $preToolUseHooks) {
-        @{ cancel = $false; contextModification = ""; errorMessage = "" } | ConvertTo-Json -Compress
+        Format-HookResponse ""
         exit 0
     }
+
+    $feedback = [System.Collections.Generic.List[string]]::new()
 
     # Find matchers that apply to this tool
     foreach ($entry in $preToolUseHooks) {
@@ -53,30 +74,32 @@ try {
                 $agentsDir = (Split-Path -Parent $hookDir).Replace('\', '/')
                 $resolvedRunner = $runner -replace '^\.agents/', ($agentsDir + '/')
 
-                if ($resolvedRunner -match '\.cmd$') {
-                    $output = $rawInput | & $resolvedRunner $scriptArgs 2>&1
-                } elseif ($resolvedRunner -match '\.ps1$') {
-                    $output = $rawInput | & $resolvedRunner $scriptArgs 2>&1
-                } else {
-                    $output = $rawInput | & $resolvedRunner $scriptArgs 2>&1
-                }
+                $output = $rawInput | & $resolvedRunner $scriptArgs 2>&1
                 $exitCode = $LASTEXITCODE
 
+                # Strip the "# 2>nul &" echo artifact that cmd.exe emits when
+                # the cross-platform run-hook.cmd polyglot starts (prompt + line).
+                $text = (($output | Out-String) -split "`r?`n" | Where-Object { $_ -notmatch '^(?:.*>)?#\s*2>nul\s*&?\s*$' }) -join "`n"
+                $text = $text.Trim()
+
                 if ($exitCode -ne 0) {
-                    $errorMsg = ($output | Out-String).Trim()
-                    if (-not $errorMsg) { $errorMsg = "Hook '$command' failed with exit code $exitCode" }
-                    @{ cancel = $true; contextModification = ""; errorMessage = $errorMsg } | ConvertTo-Json -Compress
-                    exit 1
+                    # Blocking: any non-zero child cancels the tool.
+                    if (-not $text) { $text = "Hook '$command' failed with exit code $exitCode" }
+                    @{ cancel = $true; contextModification = ""; errorMessage = $text; additionalContext = ""; suppressOutput = $true } | ConvertTo-Json -Compress
+                    exit 2
+                } elseif ($text) {
+                    # Advisory: pass-through output becomes context feedback.
+                    $feedback.Add($text)
                 }
             }
         }
     }
 
-    @{ cancel = $false; contextModification = ""; errorMessage = "" } | ConvertTo-Json -Compress
+    Format-HookResponse ($feedback -join "`n`n")
     exit 0
 
 } catch {
     Write-Error "[PreToolUse] Error: $($_.Exception.Message)"
-    @{ cancel = $true; contextModification = ""; errorMessage = "PreToolUse hook error: $($_.Exception.Message)" } | ConvertTo-Json -Compress
+    @{ cancel = $true; contextModification = ""; errorMessage = "PreToolUse hook error: $($_.Exception.Message)"; additionalContext = ""; suppressOutput = $true } | ConvertTo-Json -Compress
     exit 1
 }

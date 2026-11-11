@@ -23,7 +23,7 @@
 		"sandcastle:issue": "sandcastle",
 		"setup": "pnpm install --frozen-lockfile && pnpm build",
 		"test": "COLUMNS=${COLUMNS:-$(tput cols 2>/dev/null || echo 80)} FORCE_COLOR=1 pnpm -r --parallel --stream test",
-		"typecheck": "tsgo --build tsconfig.json --emitDeclarationOnly",
+		"typecheck": "node ./scripts/typecheck.mjs",
 		"version": "changeset version"
 	},
 	"devDependencies": {
@@ -35,7 +35,6 @@
 		"@commitlint/types": "catalog:",
 		"@isentinel/eslint-config": "catalog:",
 		"@isentinel/jest-roblox": "catalog:",
-		"@isentinel/roblox-ts": "catalog:",
 		"@isentinel/tsconfig": "catalog:",
 		"@lisachandra/sandcastle": "catalog:",
 		"@lisachandra/types": "catalog:",
@@ -44,7 +43,7 @@
 		"@rbxts/types": "catalog:",
 		"@types/node": "catalog:",
 		"@typescript-eslint/eslint-plugin": "catalog:",
-		"@typescript/native-preview": "catalog:",
+		"eslint": "^10.10.0",
 		"eslint-plugin-jest": "catalog:",
 		"eslint-plugin-jest-extended": "catalog:",
 		"eslint-plugin-react-jsx": "catalog:",

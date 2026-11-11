@@ -1,42 +1,90 @@
 #!/bin/bash
+export LC_ALL=C.UTF-8
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=detect-pm
+. "$SCRIPT_DIR/detect-pm"
+
 INPUT=$(cat)
-COMMAND=$(printf '%s' "$INPUT" | jq -r '
-  .preToolUse.parameters.command //
-  .tool_input.command //
-  empty
+COMMANDS=$(printf '%s' "$INPUT" | jq -r '
+  def jstr: fromjson? // .;
+  [
+    (.preToolUse.parameters.commands? | jstr),
+    .preToolUse.parameters.script?,
+    .preToolUse.parameters.command?,
+    (.tool_input.commands? | jstr),
+    .tool_input.command?,
+    .tool_input.script?
+  ] | map(select(. != null))
+    | map(if type == "array" then .[] else . end)
+    | map(select(type == "string" and length > 0))
+    | .[]
 ' 2>/dev/null || true)
 
-if [ -z "$COMMAND" ] || [ "$COMMAND" = "null" ]; then
+if [ -z "$COMMANDS" ]; then
   exit 0
 fi
 
+PM=""
+detect_pm >/dev/null
+
+if [ "$PM" = "bun" ]; then
+  RUNNER="bun run"
+elif [ "$PM" = "pnpm" ]; then
+  RUNNER="pnpm run"
+else
+  RUNNER="bun run / pnpm run"
+fi
+
 blocked() {
-  echo "BLOCKED: raw '$1' detected. The user has prevented you from doing this.${2:+ Use '$2' instead.}" >&2
+  echo "BLOCKED: raw '$1' detected (in: $COMMANDS). The user has prevented you from doing this.${2:+ Use '$2' instead.}" >&2
   exit 2
 }
 
-# tool_regex|suggestion (suggestion is optional)
-RULES=(
-  "jest-roblox|pnpm run test"
-  "jest|pnpm run test"
-  "eslint|pnpm run lint:fix"
-  "oxfmt|pnpm run lint:fix"
-  "oxlint|pnpm run lint:fix"
-  "prettier|pnpm run lint:fix"
-  "tsc|pnpm run typecheck"
-  "tsgo|pnpm run typecheck"
-  "rbxtsc|pnpm run build"
-)
+# No lockfile anywhere up the tree: advise instead of blocking (exit 0).
+if [ -z "$PM" ]; then
+  advisory() {
+    printf '%s\n' "[suggest] raw '$1' detected — no lockfile (bun.lock / pnpm-lock.yaml) found in $PM_ROOT, package manager not enforced. Prefer a package script when a lockfile exists."
+    exit 0
+  }
+else
+  advisory() { :; }
+fi
 
-STRIPPED=$(echo "$COMMAND" | sed -E '/git commit/,$d; s/"[^"]*"//g; s/'"'"'[^'"'"']*'"'"'//g')
+# Strip quoted strings and trailing comments; drop git-commit bodies so
+# commit messages mentioning tools don't trigger.
+STRIPPED=$(printf '%s' "$COMMANDS" | sed -E "
+  /git commit/,\$d
+  s/\"[^\"]*\"//g
+  s/'[^']*'//g
+  s/\`[^\`]*\`//g
+  s/#.*//g
+")
+
+# tool|hint  (tool is a literal; matched with PCRE \b boundaries)
+RULES=(
+  "jest-roblox|${RUNNER} test"
+  "jest|${RUNNER} test"
+  "vitest|${RUNNER} test"
+  "eslint|${RUNNER} lint:fix"
+  "oxfmt|${RUNNER} lint:fix"
+  "oxlint|${RUNNER} lint:fix"
+  "prettier|${RUNNER} lint:fix"
+  "tsc|${RUNNER} typecheck"
+  "tsgo|${RUNNER} typecheck"
+  "rbxtsc|${RUNNER} build"
+)
 
 for rule in "${RULES[@]}"; do
   tool="${rule%%|*}"
-  suggestion="${rule#*|}"
-  if echo "$STRIPPED" | grep -qE "(^|\s|&&|\|\||;)${tool}(\s|$)"; then
-    if ! echo "$STRIPPED" | grep -qE "(pnpm run|pnpm exec|pnpmx|pnpm x|pnpx|nr)"; then
-      blocked "$tool" "$suggestion"
+  hint="${rule#*|}"
+  if [ "$tool" = "$rule" ]; then hint=""; fi
+  # PCRE word boundary; handles &&  ||  ;  |  (  )  and whitespace
+  if printf '%s' "$STRIPPED" | grep -qP "\b${tool}\b"; then
+    if [ -z "$PM" ]; then
+      advisory "$tool"
     fi
+    blocked "$tool" "$hint"
   fi
 done
 

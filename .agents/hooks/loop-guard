@@ -1,0 +1,114 @@
+#!/bin/bash
+
+# Loop guard: cancel a shell command the task keeps re-issuing unchanged.
+#
+# Why: a degenerate agent run polled `sleep 280; wc -l .tmp/run-s1.log; date +%T`
+# 226 times over 6.5 hours against a test log that already said "Tests passed!"
+# (see rocket-powered-blox-cars .sandcastle/logs/issue-435.log). Nothing in the
+# hook family or the runner detected the repetition. This guard counts
+# normalized-identical shell commands per task and blocks them past a threshold.
+#
+# Normalization collapses whitespace runs and replaces digit runs with '#', so
+# `sleep 280; wc -l X` and `sleep 300; wc -l X` count as the same command family.
+# Counting is per normalized hash with a 1h decay window and deliberately does
+# NOT reset when a different command interleaves: the observed loop interleaved
+# plain `wc -l` polls between sleeps, and a reset-on-different-command would
+# never trip. A legitimate TDD loop re-runs distinct suites (distinct hashes),
+# so 12 repeats of one normalized command in an hour is a wedge, not work.
+#
+# Behavior:
+#   - below WARN threshold  -> exit 0, silent
+#   - at WARN threshold     -> exit 0, advisory line on stdout (context for the model)
+#   - at BLOCK threshold    -> "BLOCKED: ..." on stderr, exit 2
+#     (the PreToolUse orchestrator turns child exit 2 into cancel:true + errorMessage)
+#
+# Fail-open everywhere: missing jq, unreadable state, any unexpected error all
+# exit 0 and let the command through. A guard must never take the task down.
+#
+# This file must stay pure ASCII: run-hook.cmd routes it through Git Bash, but
+# the orchestrator strips cmd.exe echo artifacts from output and non-ASCII in
+# hook output has broken parses before.
+
+export LC_ALL=C.UTF-8
+
+if [ "${LOOP_GUARD_DISABLE:-0}" = "1" ]; then
+  exit 0
+fi
+
+command -v jq >/dev/null 2>&1 || exit 0
+command -v sha1sum >/dev/null 2>&1 || exit 0
+
+INPUT=$(cat)
+[ -z "$INPUT" ] && exit 0
+
+# Same extraction chain as block-destructive-commands: parameters is the
+# dirac preToolUse payload, tool_input the claude-code-shaped one, and
+# `commands` may arrive as a JSON-encoded array string.
+COMMANDS=$(printf '%s' "$INPUT" | jq -r '
+  def jstr: fromjson? // .;
+  [
+    (.preToolUse.parameters.commands? | jstr),
+    .preToolUse.parameters.script?,
+    .preToolUse.parameters.command?,
+    (.tool_input.commands? | jstr),
+    .tool_input.command?,
+    .tool_input.script?
+  ] | map(select(. != null))
+    | map(if type == "array" then .[] else . end)
+    | map(select(type == "string" and length > 0))
+    | .[]
+' 2>/dev/null) || exit 0
+[ -z "$COMMANDS" ] && exit 0
+
+TASK_ID=$(printf '%s' "$INPUT" | jq -r '.taskId? // empty' 2>/dev/null) || TASK_ID=""
+NOW_MS=$(printf '%s' "$INPUT" | jq -r '.timestamp? // empty' 2>/dev/null) || NOW_MS=""
+case "$NOW_MS" in
+  ''|*[!0-9]*) NOW_MS=$(date +%s%3N 2>/dev/null || echo "$(date +%s)000") ;;
+esac
+[ -z "$TASK_ID" ] && TASK_ID="no-task"
+
+NORM=$(printf '%s' "$COMMANDS" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/[0-9]+/#/g; s/^ //; s/ $//')
+HASH=$(printf '%s' "$NORM" | sha1sum | cut -d' ' -f1)
+
+STATE_DIR="${LOOP_GUARD_STATE_DIR:-${TMPDIR:-${TEMP:-/tmp}}/dirac-loop-guard}"
+STATE_FILE="$STATE_DIR/$TASK_ID.json"
+
+# Everything from here on must fail open.
+{
+  mkdir -p "$STATE_DIR" || exit 0
+
+  DECAY_MS=3600000
+  WARN_AT="${LOOP_GUARD_WARN_AT:-5}"
+  BLOCK_AT="${LOOP_GUARD_BLOCK_AT:-12}"
+
+  ENTRIES='{}'
+  if [ -f "$STATE_FILE" ]; then
+    PRUNED=$(jq -c --argjson now "$NOW_MS" --argjson decay "$DECAY_MS" \
+      'with_entries(select((.value.last // 0) + $decay > $now))' \
+      "$STATE_FILE" 2>/dev/null) || PRUNED='{}'
+    case "$PRUNED" in
+      \{*) ENTRIES="$PRUNED" ;;
+    esac
+  fi
+
+  COUNT=$(printf '%s' "$ENTRIES" | jq -r --arg h "$HASH" '.[$h].count // 0' 2>/dev/null) || COUNT=0
+  case "$COUNT" in
+    ''|*[!0-9]*) COUNT=0 ;;
+  esac
+  COUNT=$((COUNT + 1))
+
+  UPDATED=$(printf '%s' "$ENTRIES" | jq -c --arg h "$HASH" --argjson c "$COUNT" --argjson now "$NOW_MS" \
+    '.[$h] = {"count": $c, "last": $now}' 2>/dev/null) || exit 0
+  printf '%s' "$UPDATED" > "$STATE_FILE.tmp" 2>/dev/null && mv -f "$STATE_FILE.tmp" "$STATE_FILE" 2>/dev/null || true
+
+  if [ "$COUNT" -ge "$BLOCK_AT" ]; then
+    echo "BLOCKED: this command (normalized: '$NORM') has already run $COUNT times in this task. Its earlier output is already in your transcript - read that result or take a different approach; re-running the identical command is blocked. If the command genuinely must run again, change it (different arguments or a different way to get the same information)." >&2
+    exit 2
+  fi
+  if [ "$COUNT" -ge "$WARN_AT" ]; then
+    echo "LOOP_GUARD: this command (normalized: '$NORM') has now run $COUNT times in this task. If you are polling, the earlier output is already in your transcript - read it instead of re-running; blocking starts at $BLOCK_AT."
+    exit 0
+  fi
+} || exit 0
+
+exit 0

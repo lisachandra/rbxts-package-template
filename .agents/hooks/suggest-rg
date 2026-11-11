@@ -1,0 +1,35 @@
+#!/bin/bash
+export LC_ALL=C.UTF-8
+INPUT=$(cat)
+COMMANDS=$(printf '%s' "$INPUT" | jq -r '
+  def jstr: fromjson? // .;
+  [
+    (.preToolUse.parameters.commands? | jstr),
+    .preToolUse.parameters.script?,
+    .preToolUse.parameters.command?,
+    (.tool_input.commands? | jstr),
+    .tool_input.command?,
+    .tool_input.script?
+  ] | map(select(. != null))
+    | map(if type == "array" then .[] else . end)
+    | map(select(type == "string" and length > 0))
+    | .[]
+' 2>/dev/null || true)
+
+[ -z "$COMMANDS" ] && exit 0
+
+# PCRE word boundaries handle && || ; | ( ) & and whitespace uniformly.
+# Skip when ripgrep is already in use or when grep is part of git grep.
+if printf '%s' "$COMMANDS" | grep -qP '\brg\b'; then
+  exit 0
+fi
+if printf '%s' "$COMMANDS" | grep -qP 'git\s+grep'; then
+  exit 0
+fi
+
+# Suggest, never block: exit 0 so the command always runs.
+if printf '%s' "$COMMANDS" | grep -qP '\bgrep\b'; then
+  printf '%s\n' "[suggest] Prefer 'rg' over 'grep' — faster, respects .gitignore, better defaults. Example: rg 'pattern' src/"
+fi
+
+exit 0

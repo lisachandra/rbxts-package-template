@@ -30,5 +30,8 @@
 	},
 	"chat.hookFilesLocations": {
 		"./.agents/settings.json": true
+	},
+	"debug.javascript.defaultRuntimeExecutable": {
+		"pwa-node": "${workspaceFolder}\\.vscode\\mise-tools\\node"
 	}
 }

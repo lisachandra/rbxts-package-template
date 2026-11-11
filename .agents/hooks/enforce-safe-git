@@ -1,37 +1,70 @@
 #!/bin/bash
 INPUT=$(cat)
-COMMAND=$(printf '%s' "$INPUT" | jq -r '
-  .preToolUse.parameters.command //
-  .tool_input.command //
-  empty
+COMMANDS=$(printf '%s' "$INPUT" | jq -r '
+  def jstr: fromjson? // .;
+  [
+    (.preToolUse.parameters.commands? | jstr),
+    .preToolUse.parameters.script?,
+    .preToolUse.parameters.command?,
+    (.tool_input.commands? | jstr),
+    .tool_input.command?,
+    .tool_input.script?
+  ] | map(select(. != null))
+    | map(if type == "array" then .[] else . end)
+    | map(select(type == "string" and length > 0))
+    | .[]
 ' 2>/dev/null || true)
 
-if [ -z "$COMMAND" ] || [ "$COMMAND" = "null" ]; then
+if [ -z "$COMMANDS" ]; then
   exit 0
 fi
 
+STRIPPED=$(printf '%s' "$COMMANDS" | sed -E "s/'[^']*'//g; s/\"[^\"]*\"//g")
+
 blocked() {
-  echo "BLOCKED: '$COMMAND' matches dangerous pattern '$1'. The user has prevented you from doing this.${2:+ Use '$2' instead.}" >&2
+  echo "BLOCKED: '$COMMANDS' matches dangerous pattern '$1'. The user has prevented you from doing this.${2:+ Use '$2' instead.}" >&2
   exit 2
 }
 
-# pattern::suggestion (suggestion is optional). Use :: so regex | is safe.
+# pattern::suggestion  (ERE via grep -E)
 RULES=(
-  'push --force($|[[:space:]])::push --force-with-lease'
-  '--no-verify::'
-  'git reset --hard::git stash'
-  'reset --hard::git stash'
-  'git clean -fd::'
-  'git clean -f::'
-  'git checkout \.::git stash'
-  'git restore \.::git stash'
+  '--no-verify::remove --no-verify (hooks must run)'
+  'git[[:space:]]+push.*--force($|[[:space:]])::git push --force-with-lease'
+  'push[[:space:]]+.*--force($|[[:space:]])::git push --force-with-lease'
+  'git[[:space:]]+push.*[[:space:]]-f($|[[:space:]]|;)::git push --force-with-lease'
+  'reset[[:space:]]+.*--hard::git stash (reset --hard discards changes)'
+  'git[[:space:]]+clean[[:space:]]+.*--[[:space:]]*force::git stash (git clean --force discards untracked files)'
+  'git[[:space:]]+clean[[:space:]]+.*-[a-zA-Z]*f[a-zA-Z]*::git stash (git clean -f discards untracked files)'
+  'clean[[:space:]]+.*--[[:space:]]*force::git stash'
+  'clean[[:space:]]+.*-[a-zA-Z]*f[a-zA-Z]*::git stash'
+  'git[[:space:]]+checkout[[:space:]]+--::git stash (checkout -- discards files)'
+  'checkout[[:space:]]+--::git stash (checkout -- discards files)'
+  'git[[:space:]]+checkout[[:space:]]+\.::git stash (checkout . discards changes)'
+  'checkout[[:space:]]+\.::git stash'
+  'git[[:space:]]+checkout[[:space:]]+HEAD[[:space:]]+[^;|&]*\.::git stash (checkout HEAD discards files)'
+  'checkout[[:space:]]+HEAD[[:space:]]+[^;|&]*\.::git stash'
+  'git[[:space:]]+restore($|[[:space:]])::git stash (git restore discards changes)'
+  'git[[:space:]]+switch.*--discard-changes::git stash'
+  'git[[:space:]]+switch.*[[:space:]]-f($|[[:space:]]|;)::git stash'
+  'git[[:space:]]+branch[[:space:]]+.*-[a-zA-Z]*D::git branch -d (use -d, not -D)'
+  'git[[:space:]]+stash[[:space:]]+(drop|clear)::git stash list (stash drop/clear is destructive)'
 )
 
 for rule in "${RULES[@]}"; do
   pattern="${rule%%::*}"
   suggestion="${rule#*::}"
-  # -- ends options so patterns like --no-verify are not treated as flags.
-  if echo "$COMMAND" | grep -qE -- "$pattern"; then
+  [ -n "$pattern" ] || continue
+  if [ "$pattern" = "$rule" ]; then
+    suggestion=""
+  fi
+  if printf '%s' "$STRIPPED" | grep -qE -- "$pattern"; then
+    if printf '%s' "$STRIPPED" | grep -qE -- '--force-with-lease'; then
+      if printf '%s' "$STRIPPED" | grep -qE -- 'push.*--force-with-lease'; then
+        case "$pattern" in
+          *"--force"*) continue ;;
+        esac
+      fi
+    fi
     blocked "$pattern" "$suggestion"
   fi
 done

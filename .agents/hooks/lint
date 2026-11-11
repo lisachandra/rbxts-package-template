@@ -2,77 +2,204 @@
 set -u
 
 INPUT=$(cat)
-FILE=$(printf '%s' "$INPUT" | jq -r '
-  .postToolUse.parameters.path //
-  .postToolUse.parameters.file_path //
-  .postToolUse.parameters.filename //
-  .postToolUse.tool_input.file_path //
-  .postToolUse.tool_input.path //
-  .postToolUse.tool_input.filename //
-  .preToolUse.parameters.path //
-  .preToolUse.parameters.file_path //
-  .preToolUse.parameters.filename //
-  .preToolUse.tool_input.file_path //
-  .preToolUse.tool_input.path //
-  .preToolUse.tool_input.filename //
-  .tool_input.path //
-  .tool_input.file_path //
-  .tool_input.filename //
-  .path // empty
+FILES=$(printf '%s' "$INPUT" | jq -r '
+  def jstr: fromjson? // .;
+  [
+    .postToolUse.parameters.path?,
+    .postToolUse.parameters.file_path?,
+    .postToolUse.parameters.filename?,
+    (.postToolUse.parameters.files? | jstr | if type == "array" then .[]?.path else . end),
+    .postToolUse.rawInput.path?,
+    .postToolUse.rawInput.filePath?,
+    (.postToolUse.rawInput.paths? | if type == "array" then .[] else . end),
+    .preToolUse.parameters.path?,
+    .preToolUse.parameters.file_path?,
+    .preToolUse.parameters.filename?,
+    (.preToolUse.parameters.files? | jstr | if type == "array" then .[]?.path else . end),
+    (.tool_input.files? | jstr | if type == "array" then .[]?.path else . end),
+    .tool_input.path?,
+    .tool_input.file_path?,
+    .tool_input.filename?,
+    .path?
+  ] | map(select(type == "string" and length > 0)) | unique | .[]
 ' 2>/dev/null || true)
 
-# Nothing to lint when the tool did not target a file.
-if [ -z "$FILE" ] || [ "$FILE" = "null" ]; then
-  exit 0
-fi
+[ -z "$FILES" ] && exit 0
 
-FILE=${FILE//\\//}
-while [[ "$FILE" == ./* ]]; do FILE=${FILE#./}; done
-REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
-if [[ "$FILE" = /* ]]; then
-  FILE=${FILE#"$REPO_ROOT"/}
-fi
+HOST_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+HOST_ROOT="${HOST_ROOT//\\//}"
 
-cd "$REPO_ROOT" || exit 0
-if [ ! -f "$FILE" ]; then
-  exit 0
-fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=detect-pm
+. "$SCRIPT_DIR/detect-pm"
 
-case "$FILE" in
-  *.js|*.jsx|*.mjs|*.cjs|*.ts|*.tsx|*.mts|*.cts)
-    ;;
-  *)
-    exit 0
-    ;;
-esac
+# True when the tool is installed in the workspace (bunx would otherwise
+# auto-install it from the registry, which a hook must never do).
+ws_has_tool() {
+  local ws="$1" tool="$2" ext
+  for ext in "" ".exe" ".cmd"; do
+    [ -e "$ws/node_modules/.bin/$tool$ext" ] && return 0
+  done
+  return 1
+}
 
-# PostToolUse linting is advisory: findings are printed as feedback for the
-# agent, but the edit that triggered this hook must never be blocked or failed.
-# Always exit 0 regardless of what the linters report.
-notices=""
+resolve_pm_root() {
+  local target="$1"
+  local dir
+  if [ -d "$target" ]; then
+    dir="$target"
+  else
+    dir="$(dirname "$target")"
+  fi
+  local cur="$dir"
+  while true; do
+    if [ -f "$cur/pnpm-workspace.yaml" ] || [ -f "$cur/pnpm-workspace.yml" ] \
+      || [ -f "$cur/bun.lock" ] || [ -f "$cur/bun.lockb" ]; then
+      printf '%s' "$cur"
+      return 0
+    fi
+    local parent
+    parent="$(dirname "$cur")"
+    if [ "$parent" = "$cur" ]; then
+      break
+    fi
+    cur="$parent"
+  done
+  local git_root
+  git_root="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -n "$git_root" ]; then
+    git_root="${git_root//\\//}"
+    printf '%s' "$git_root"
+    return 0
+  fi
+  git_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -n "$git_root" ]; then
+    git_root="${git_root//\\//}"
+    printf '%s' "$git_root"
+    return 0
+  fi
+  printf '%s' "$(pwd)"
+}
 
-if ! OXFMT_OUTPUT=$(pnpm exec oxfmt "$FILE" 2>&1); then
-  OXFMT_OUTPUT=$(printf '%s' "$OXFMT_OUTPUT" | sed '/\[WARN\] Ignored project-level auth setting/d')
-  notices="${notices}[lint] oxfmt reported issues in $FILE
+summary=""
+details=""
+
+while IFS= read -r FILE; do
+  [ -n "$FILE" ] || continue
+
+  RAW_NORM="${FILE//\\//}"
+  while [[ "$RAW_NORM" == ./* ]]; do RAW_NORM="${RAW_NORM#./}"; done
+
+  ABS=""
+  if [[ "$RAW_NORM" =~ ^[A-Za-z]:/ ]] || [[ "$RAW_NORM" == /* ]]; then
+    ABS="$RAW_NORM"
+  else
+    ABS="$HOST_ROOT/$RAW_NORM"
+  fi
+
+  if command -v realpath >/dev/null 2>&1; then
+    ABS="$(realpath -m "$ABS" 2>/dev/null || printf '%s' "$ABS")"
+    ABS="${ABS//\\//}"
+  elif command -v readlink >/dev/null 2>&1; then
+    ABS="$(readlink -m "$ABS" 2>/dev/null || printf '%s' "$ABS")"
+    ABS="${ABS//\\//}"
+  fi
+
+  [ -f "$ABS" ] || continue
+
+  case "$ABS" in
+    *.js|*.jsx|*.mjs|*.cjs|*.ts|*.tsx|*.mts|*.cts)
+      ;;
+    *)
+      continue
+      ;;
+  esac
+
+  WS="$(resolve_pm_root "$ABS")"
+  WS="${WS//\\//}"
+
+  REL="$ABS"
+  if [[ "$ABS" == "$WS"/* ]]; then
+    REL="${ABS#"$WS"/}"
+  fi
+  DISPLAY="$REL"
+  # Keep absolute display when file is outside workspace
+  if [[ "$REL" == "$ABS" ]] && [[ "$RAW_NORM" != /* ]] && [[ ! "$RAW_NORM" =~ ^[A-Za-z]:/ ]]; then
+    DISPLAY="$RAW_NORM"
+  fi
+
+  PM="$(detect_pm "$WS")"
+  if [ -z "$PM" ]; then
+    # No lockfile owns this file: tools may not be installed, and bunx would
+    # auto-install from the registry. Skip silently.
+    continue
+  fi
+
+  status="ok"
+
+  if [ "$PM" = "bun" ]; then
+    if ws_has_tool "$WS" oxfmt; then
+      OXFMT_OUTPUT="$(cd "$WS" && timeout 90 bun x oxfmt "$REL" 2>&1)"
+      OXFMT_EXIT=$?
+    else
+      OXFMT_OUTPUT=""
+      OXFMT_EXIT=0
+    fi
+  else
+    OXFMT_OUTPUT="$(timeout 90 pnpm --dir "$WS" exec oxfmt "$REL" 2>&1)"
+    OXFMT_EXIT=$?
+  fi
+  if [ "$OXFMT_EXIT" -ne 0 ]; then
+    status="issues"
+    if [ "$OXFMT_EXIT" -eq 124 ]; then
+      details="${details}[lint] oxfmt timed out (90s) on $DISPLAY (workspace: $WS)
+
+"
+    else
+      OXFMT_OUTPUT="$(printf '%s' "$OXFMT_OUTPUT" | sed '/\[WARN\] Ignored project-level auth setting/d')"
+      details="${details}[lint] oxfmt reported issues in $DISPLAY (workspace: $WS)
 $OXFMT_OUTPUT
 
 "
-fi
+    fi
+  fi
 
-if ! OXLINT_OUTPUT=$(pnpm exec oxlint --fix "$FILE" 2>&1); then
-  OXLINT_OUTPUT=$(printf '%s' "$OXLINT_OUTPUT" | sed '/\[WARN\] Ignored project-level auth setting/d')
-  notices="${notices}[lint] oxlint reported issues in $FILE
+  if [ "$PM" = "bun" ]; then
+    if ws_has_tool "$WS" oxlint; then
+      OXLINT_OUTPUT="$(cd "$WS" && timeout 90 bun x oxlint --fix "$REL" 2>&1)"
+      OXLINT_EXIT=$?
+    else
+      OXLINT_OUTPUT=""
+      OXLINT_EXIT=0
+    fi
+  else
+    OXLINT_OUTPUT="$(timeout 90 pnpm --dir "$WS" exec oxlint --fix "$REL" 2>&1)"
+    OXLINT_EXIT=$?
+  fi
+  if [ "$OXLINT_EXIT" -ne 0 ]; then
+    status="issues"
+    if [ "$OXLINT_EXIT" -eq 124 ]; then
+      details="${details}[lint] oxlint timed out (90s) on $DISPLAY (workspace: $WS)
+
+"
+    else
+      OXLINT_OUTPUT="$(printf '%s' "$OXLINT_OUTPUT" | sed '/\[WARN\] Ignored project-level auth setting/d')"
+      details="${details}[lint] oxlint reported issues in $DISPLAY (workspace: $WS)
 $OXLINT_OUTPUT
 
 "
-fi
-
-if [ -n "$notices" ]; then
-  if [ "${#notices}" -gt 30000 ]; then
-    printf '%s\n%s\n' "${notices:0:30000}" "[lint] output truncated; run 'pnpm exec oxlint <file>' locally for full results"
-  else
-    printf '%s' "$notices"
+    fi
   fi
+
+  summary="${summary}[lint] $DISPLAY: $status (workspace: $WS)
+"
+done <<< "$FILES"
+
+if [ -n "$summary" ]; then
+  printf '%s' "$summary"
+fi
+if [ -n "$details" ]; then
+  printf '\n%s' "$details"
 fi
 
 exit 0

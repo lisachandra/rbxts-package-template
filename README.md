@@ -15,24 +15,36 @@
 
 </div>
 
-A pnpm monorepo template for `@lisachandra` roblox-ts packages, modeled on the
-[`rbxts`](https://github.com/lisachandra/rbxts) monorepo and the
-`rbxts-game-template` tooling layer. It keeps the strict
-build/lint/typecheck/test pipeline while dropping game-only machinery
-(bedrock, asphalt, drillbit, darklua, LFS, submodules, and game scaffolds).
+A general-purpose Roblox monorepo package template built with roblox-ts, pnpm, the
+`@lisachandra` runtime stack, and a strict build/lint/typecheck/emulated test pipeline.
 
-## Features
+## Core Features
 
-- pnpm workspace with `packages/*` (published libraries) and `test/*`
-  (private jest-roblox test projects)
-- `@isentinel/roblox-ts` compiler + `@isentinel/tsconfig` project references
-- oxfmt + oxlint via `@isentinel/eslint-config`, commitlint + husky hooks
-- tsgo (TypeScript 7 native preview) typecheck
-- jest-roblox tests with a Studio CLI backend locally and Open Cloud in CI
-- changesets versioning with npm publishing and a dispatch-driven release
-  workflow
-- pnpm patch infrastructure, including the dormant
-  `rbxts-transformer-flamework` patch for future Flamework packages
+- **`sloptor` replaces `rbxtsc`** — a native TypeScript→Luau compiler and type
+  checker in one binary. It builds packages with `--type package` (emitting the
+  declarations a published package ships) and runs the strict typecheck from
+  the same tool.
+- **Offline emulated test lane** — `pnpm test` compiles each `test/<name>`
+  workspace to Luau and runs its suite inside `ree`, a headless Roblox engine
+  reimplementation. No Studio roundtrip, no uploaded place, no credentials, and
+  CI needs no Roblox secrets. Specs with engine parity gaps are listed in
+  `reeParityPaths` (`jest.shared.ts`) and run against Studio with
+  `--backend studio`.
+- **Interactive setup** — `bash scripts/setup-template.sh` walks through
+  package naming and scoping, Roblox ids, the npm publish token, badge gists,
+  and CI secrets, then installs and builds.
+
+## Toolchain Credits
+
+The compiler, emulator, and jest runner are personal forks of public projects:
+
+| Tool                     | Upstream                                                                                                            | Fork adds                                                                     |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `sloptor`                | [`howmanyslop/sloptor`](https://github.com/howmanyslop/sloptor)                                                     | Pinned fork build; `--type package` emits the declarations each package ships |
+| `ree`                    | [`Anime-Vanguards/roblox-engine-emulator`](https://github.com/Anime-Vanguards/roblox-engine-emulator)               | Pinned commit with the harness fixes (GPL-2.0-or-later)                       |
+| `@isentinel/jest-roblox` | [`christopher-buss/jest-roblox-cli`](https://github.com/christopher-buss/jest-roblox-cli) by Christopher Buss (MIT) | The `emulator` backend that runs jest suites inside `ree`                     |
+
+Forks are consumed as release binaries and tarballs, never vendored.
 
 ## Requirements
 
@@ -42,7 +54,8 @@ build/lint/typecheck/test pipeline while dropping game-only machinery
 
 ## Setup Wizard (recommended)
 
-Run the interactive setup wizard instead of configuring by hand:
+Creating a project _from_ this template? Run the interactive wizard instead of
+configuring by hand:
 
 ```bash
 bash scripts/setup-template.sh
@@ -52,52 +65,15 @@ It walks you through renaming `packages/example` and `test/example`, your
 Roblox Open Cloud test credentials, the npm publish token, badge gists, and
 GitHub CI secrets, then installs and builds.
 
+The wizard is for a fresh copy only — it rewrites tracked files in place, so do
+not run it inside the template repository itself. For the full manual path,
+including adding a package and the Studio lane, see
+[`docs/agents/setup-guide.md`](docs/agents/setup-guide.md).
+
 ## Getting Started
 
 ```bash
 pnpm setup
-```
-
-`pnpm setup` installs with `--frozen-lockfile` and builds every workspace
-package in dependency order.
-
-For Codex agent hooks, junction your global agent config (the repo already
-gitignores it):
-
-```bash
-mklink /J .agents C:\Users\PC\.agents   # Windows
-ln -s ~/.agents .agents                 # Unix
-```
-
-## Commands
-
-| Task                        | Command               |
-| --------------------------- | --------------------- |
-| Setup (install + build)     | `pnpm setup`          |
-| Build all                   | `pnpm build`          |
-| Build packages only         | `pnpm build:packages` |
-| Build tests only            | `pnpm build:test`     |
-| Dev (watch)                 | `pnpm dev`            |
-| Lint                        | `pnpm lint:fix`       |
-| Typecheck                   | `pnpm typecheck`      |
-| Test (Studio CLI)           | `pnpm test`           |
-| Create a changeset          | `pnpm changeset`      |
-| Release (version + publish) | `pnpm release`        |
-
-## Repository Structure
-
-```
-rbxts-package-template/
-├── packages/example/     @lisachandra/example — the library package
-├── test/example/         @lisachandra/test-example — its jest-roblox project
-├── scripts/              build.mjs (scoped builds), hoist.mjs, prepare.mjs
-├── patches/              pnpm patches (incl. dormant flamework patch)
-├── .changeset/           changesets config
-├── .github/              CI + release workflows, setup action, dependabot
-├── .husky/               commit-msg + pre-push hooks
-├── jest.shared.ts        shared jest-roblox config
-├── tsconfig.json         root project references
-└── pnpm-workspace.yaml   workspace globs + tooling catalog
 ```
 
 ## Adding a Package
@@ -116,14 +92,16 @@ rbxts-package-template/
 ## Testing
 
 Each `test/<name>` project builds a minimal Roblox place with
-`rbxtsc --type 'game'` and runs jest-roblox:
+`sloptor build --type game` and runs jest-roblox:
 
-- Locally: `pnpm test` uses the `studio-cli` backend (auto-detects Studio).
-- CI: the test job runs only when `ROBLOX_OPEN_CLOUD_API_KEY` is configured
-  and uses the `open-cloud` backend with `ROBLOX_PLACE_ID` and
-  `ROBLOX_UNIVERSE_ID` (see `.env.example`). The API key needs
-  `universe-places:write` and `universe.place.luau-execution-session:write`
-  scopes on a dedicated test place.
+- Locally and in CI: `pnpm test` uses the `emulator` backend — the compiled
+  `out/` tree is staged and run inside `ree`, offline, with no Studio and no
+  Roblox credentials.
+- To confirm a spec against a real engine, run it with `--backend studio`
+  against a local Studio install.
+- `test/example/src/jest.config.luau` is the per-project Luau config the staged
+  runner reads; `jest.shared.ts` holds the backend and coverage settings every
+  project inherits.
 
 ## Status Badges
 

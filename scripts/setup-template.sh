@@ -417,7 +417,7 @@ if [[ "$TEMPLATE_KIND" == "package" ]]; then
   TOTAL_MINUTES=55
   WZ_TITLE="rbxts-package-template setup"
 else
-  TOTAL_STAGES=13
+  TOTAL_STAGES=12
   TOTAL_MINUTES=65
   WZ_TITLE="rbxts-game-template setup"
 fi
@@ -454,7 +454,7 @@ fi
 if detect_studio; then
   note "Roblox Studio — found"
 else
-  warn "Roblox Studio — not detected (needed for pnpm test:local and Studio-backed tests)"
+  warn "Roblox Studio — not detected (needed for the Studio-backed test lane)"
   open_url "https://create.roblox.com/landing"
 fi
 pause "Press Enter when the prerequisites are ready (install anything missing first)"

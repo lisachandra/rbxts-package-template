@@ -10,10 +10,20 @@ creator-docs/
 .diracrules
 .zcode
 .dirac-cache
+.agents/references
 .agents/.skill-lock.json
 
 # Dependencies
 node_modules
+
+# sloptor's per-project incremental cache
+.rotor/
+
+# ree (emulator test backend) run recordings
+.cache/
+
+# Machine-local mise overrides; mise.toml carries the committed pins.
+mise.local.toml
 
 # Build output
 out/
